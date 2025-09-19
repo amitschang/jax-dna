@@ -211,7 +211,7 @@ def from_file(
 
     boundaries = np.linspace(0, path.stat().st_size, n_processes + 1, dtype=np.int64)
     n_runs = len(boundaries) - 1
-    with cf.ProcessPoolExecutor(n_processes, mp_context=mp.get_context("spawn")) as pool:
+    with cf.ProcessPoolExecutor(n_processes) as pool:
         vals = list(
             pool.map(
                 _read_file_process_wrapper,

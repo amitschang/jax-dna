@@ -12,3 +12,12 @@ JOULES_PER_OXDNA_ENERGY = 4.142e-20
 def get_kt(t_kelvin: jd_types.ARR_OR_SCALAR) -> jd_types.ARR_OR_SCALAR:
     """Converts a temperature in Kelvin to kT in simulation units."""
     return 0.1 * t_kelvin / 300.0
+
+def get_kt_from_C(t_celsius: jd_types.ARR_OR_SCALAR) -> jd_types.ARR_OR_SCALAR:
+    """Converts a temperature in Celsius to kT in simulation units."""
+    return get_kt(t_celsius + 273.15)
+
+def from_kt(kt: jd_types.ARR_OR_SCALAR) -> jd_types.ARR_OR_SCALAR:
+    """Converts kT in simulation units to temperature in Kelvin."""
+    return 300.0 * kt / 0.1
+

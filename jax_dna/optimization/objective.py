@@ -16,6 +16,7 @@ import typing_extensions
 
 import jax_dna.energy as jdna_energy
 import jax_dna.input.tree as jdna_tree
+from jax_dna.simulators.io import SimulatorTrajectory
 import jax_dna.utils.types as jdna_types
 
 ERR_DIFFTRE_MISSING_KWARGS = "Missing required kwargs: {missing_kwargs}."
@@ -113,7 +114,8 @@ class Objective:
             for exposed, output in filter(
                 lambda e: e[0] in self._needed_observables, zip(sim_exposes, sim_output, strict=True)
             ):
-                self._obtained_observables.append((exposed, jdna_tree.load_pytree(output)))
+                # self._obtained_observables.append((exposed, jdna_tree.load_pytree(output)))
+                self._obtained_observables.append((exposed, output))
                 self._needed_observables.remove(exposed)
 
     def calculate(self) -> list[jdna_types.Grads]:
@@ -184,6 +186,7 @@ def compute_loss(
     ],
     ref_states: jax_md.rigid_body.RigidBody,
     ref_energies: jdna_types.Arr_N,
+    extra: dict[str, typing.Any] = None,
 ) -> tuple[float, tuple[float, jnp.ndarray]]:
     """Compute the grads, loss, and auxiliary values.
 
@@ -206,7 +209,7 @@ def compute_loss(
         new_energies,
         ref_energies,
     )
-    loss, (measured_value, meta) = loss_fn(ref_states, weights, energy_fn)
+    loss, (measured_value, meta) = loss_fn(ref_states, weights, energy_fn, opt_params, extra)
     return loss, (neff, measured_value, new_energies)
 
 
@@ -287,6 +290,8 @@ class DiffTReObjective(Objective):
         )
         sorted_obs = [x[1] for x in sorted_obtained_observables]
 
+        extra = {k: v for k,v in self._obtained_observables}
+
         (loss, (_, measured_value, new_energies)), grads = compute_loss_and_grad(
             self._opt_params,
             self._energy_fn_builder,
@@ -294,6 +299,7 @@ class DiffTReObjective(Objective):
             self._grad_or_loss_fn,
             self._reference_states,
             self._reference_energies,
+            extra,
         )
 
         latest_neff = next(obs for obs in self._obtained_observables if obs[0] == "neff")
@@ -315,7 +321,7 @@ class DiffTReObjective(Objective):
                 key=lambda x: self._required_observables.index(x[0]),
             )
 
-            new_tracjectories = [oo[1] for oo in sorted_obtained_observables]
+            new_trajs = [oo[1] for oo in sorted_obtained_observables if isinstance(oo[1], SimulatorTrajectory)]
             if self._reference_states is None:
 
                 def slc_f(n: int) -> slice:
@@ -323,7 +329,7 @@ class DiffTReObjective(Objective):
 
                 self._reference_states = functools.reduce(
                     operator.add,
-                    [obs.slice(slc_f(len(obs.rigid_body.center))) for obs in new_tracjectories],
+                    [obs.slice(slc_f(len(obs.rigid_body.center))) for obs in new_trajs],
                 )
 
                 self._reference_energies = self._energy_fn_builder(self._opt_params)(self._reference_states)

@@ -141,8 +141,6 @@ class oxDNASimulator(jd_base.BaseSimulation):  # noqa: N801 oxDNA is a special w
         input_config["seed"] = seed or np.random.default_rng().integers(0, 2**32)
         jd_oxdna.write(input_config, input_file)
 
-        oxdna_config = jd_oxdna.read(init_dir / "input")
-        output_file = init_dir / oxdna_config["trajectory_file"]
 
         std_out_file = init_dir / "oxdna.out.log"
         std_err_file = init_dir / "oxdna.err.log"
@@ -158,18 +156,22 @@ class oxDNASimulator(jd_base.BaseSimulation):  # noqa: N801 oxDNA is a special w
             subprocess.check_call(cmd, stdout=f_std, stderr=f_err, cwd=init_dir)
         logger.info("oxDNA simulation complete")
 
-        # read the output trajectory file
-        topology = jd_top.from_oxdna_file(init_dir / oxdna_config["topology"])
-        # return the trajectory
-        trajectory = jd_traj.from_file(output_file, topology.strand_counts, is_oxdna=True)
+        return self._read_trajectory()
 
-        logger.debug(
-            "oxDNA trajectory com size: %s",
-            str(trajectory.state_rigid_body.center.shape),
-        )
+    def _read_trajectory(self):
+        oxdna_config = jd_oxdna.read(self.input_dir / "input")
+        trajectory_file = self.input_dir / oxdna_config["trajectory_file"]
+        topology_file = self.input_dir / oxdna_config["topology"]
+
+        topology = jd_top.from_oxdna_file(topology_file)
+        trajectory = jd_traj.from_file(trajectory_file, topology.strand_counts, is_oxdna=True)
+
+        logger.debug("oxDNA trajectory com size: %s", trajectory.state_rigid_body.center.shape)
+
         return jd_sio.SimulatorTrajectory(
             rigid_body=trajectory.state_rigid_body,
         )
+
 
     def build(self, *, new_params: list[dict]) -> None:
         """Update the simulation.

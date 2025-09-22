@@ -157,8 +157,7 @@ def test_objective_update(
     updates = []
     for update in update_collection:
         observable, (file_name, data) = update
-        updates.append(([observable], [data_dir / file_name]))
-        jdna_tree.save_pytree(data, data_dir / file_name)
+        updates.append(([observable], [data]))
 
     obj = o.Objective(
         name="test",

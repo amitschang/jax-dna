@@ -25,5 +25,5 @@ class ConsoleLogger(Logger):
 
         print(f"Step: {step}, {name}: {value}")  # noqa: T201 -- we intend to print to the console
 
-    def __update_status(self, name: str, status: Status) -> None:
+    def _update_status(self, name: str, status: Status) -> None:
         return print(name, status)  # noqa: T201 -- we intend to print to the console

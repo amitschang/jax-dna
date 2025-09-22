@@ -47,7 +47,7 @@ class Logger:
             with fname.open(mode="a") as f:
                 f.write(f"{step},{value}\n")
 
-    def __update_status(self, name: str, status: Status) -> None:
+    def _update_status(self, name: str, status: Status) -> None:
         """Updates the status of a simulator, objective, or observable."""
         if self.log_dir is not None:
             fname = self.log_dir / convert_to_fname(name)
@@ -56,60 +56,60 @@ class Logger:
 
     def update_simulator_status(self, name: str, status: Status) -> None:
         """Updates the status of a simulator."""
-        self.__update_status(name, status)
+        self._update_status(name, status)
 
     def set_simulator_started(self, name: str) -> None:
         """Sets the status of a simulator to STARTED."""
-        self.__update_status(name, Status.STARTED)
+        self._update_status(name, Status.STARTED)
 
     def set_simulator_running(self, name: str) -> None:
         """Sets the status of a simulator to RUNNING."""
-        self.__update_status(name, Status.RUNNING)
+        self._update_status(name, Status.RUNNING)
 
     def set_simulator_complete(self, name: str) -> None:
         """Sets the status of a simulator to COMPLETE."""
-        self.__update_status(name, Status.COMPLETE)
+        self._update_status(name, Status.COMPLETE)
 
     def set_simulator_error(self, name: str) -> None:
         """Sets the status of a simulator to ERROR."""
-        self.__update_status(name, Status.ERROR)
+        self._update_status(name, Status.ERROR)
 
     def update_objective_status(self, name: str, status: Status) -> None:
         """Updates the status of an objective."""
-        self.__update_status(name, status)
+        self._update_status(name, status)
 
     def set_objective_started(self, name: str) -> None:
         """Sets the status of an objective to STARTED."""
-        self.__update_status(name, Status.STARTED)
+        self._update_status(name, Status.STARTED)
 
     def set_objective_running(self, name: str) -> None:
         """Sets the status of an objective to RUNNING."""
-        self.__update_status(name, Status.RUNNING)
+        self._update_status(name, Status.RUNNING)
 
     def set_objective_complete(self, name: str) -> None:
         """Sets the status of an objective to COMPLETE."""
-        self.__update_status(name, Status.COMPLETE)
+        self._update_status(name, Status.COMPLETE)
 
     def set_objective_error(self, name: str) -> None:
         """Sets the status of an objective to ERROR."""
-        self.__update_status(name, Status.ERROR)
+        self._update_status(name, Status.ERROR)
 
     def update_observable_status(self, name: str, status: Status) -> None:
         """Updates the status of an observable."""
-        self.__update_status(name, status)
+        self._update_status(name, status)
 
     def set_observable_started(self, name: str) -> None:
         """Sets the status of an observable to STARTED."""
-        self.__update_status(name, Status.STARTED)
+        self._update_status(name, Status.STARTED)
 
     def set_observable_running(self, name: str) -> None:
         """Sets the status of an observable to RUNNING."""
-        self.__update_status(name, Status.RUNNING)
+        self._update_status(name, Status.RUNNING)
 
     def set_observable_complete(self, name: str) -> None:
         """Sets the status of an observable to COMPLETE."""
-        self.__update_status(name, Status.COMPLETE)
+        self._update_status(name, Status.COMPLETE)
 
     def set_observable_error(self, name: str) -> None:
         """Sets the status of an observable to ERROR."""
-        self.__update_status(name, Status.ERROR)
+        self._update_status(name, Status.ERROR)

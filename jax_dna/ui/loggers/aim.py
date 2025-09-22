@@ -17,8 +17,9 @@ class AimLogger(Logger):
 
     def log_metric(self, name: str, value: float, step: int) -> None:
         """Log a metric value to Aim."""
+        value = float(value)  # Give aim python object (iso jax/numpy array obj)
         self.aim_run.track(value, name=name, step=step)
 
-    def __update_status(self, name: str, status: Status) -> None:
+    def _update_status(self, name: str, status: Status) -> None:
         """Log status changes to Aim."""
         self.aim_run.track(str(status), name=f"status/{name}")

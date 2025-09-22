@@ -77,6 +77,8 @@ class oxDNASimulator(jd_base.BaseSimulation):  # noqa: N801 oxDNA is a special w
             self.build_dir = Path(tempfile.mkdtemp(prefix="jaxdna-oxdna-build-"))
             self.binary_path = self.build_dir / "bin" / "oxDNA"
         self.binary_path = Path(self.binary_path).resolve()
+        self.input_file = Path(self.input_dir) / "input"
+        self.input_config = jd_oxdna.read(self.input_file)
         self._initialize_logger()
 
     def _initialize_logger(self) -> None:
@@ -127,22 +129,14 @@ class oxDNASimulator(jd_base.BaseSimulation):  # noqa: N801 oxDNA is a special w
         elif self.source_path and not self.binary_path.exists():
             self.build(new_params=[])
 
-        init_dir = Path(self.input_dir)
-        input_file = init_dir / "input"
-
-        logger.info("oxDNA input file: %s", input_file)
-
-        if not input_file.exists():
-            raise FileNotFoundError(ERR_INPUT_FILE_NOT_FOUND.format(input_file))
+        logger.info("oxDNA input file: %s", self.input_file)
 
         # overwrite the seed
-        input_config = jd_oxdna.read(input_file)
-        input_config["seed"] = seed or np.random.default_rng().integers(0, 2**32)
-        jd_oxdna.write(input_config, input_file)
+        self.input_config["seed"] = seed or np.random.default_rng().integers(0, 2**32)
+        jd_oxdna.write(self.input_config, self.input_file)
 
-
-        std_out_file = init_dir / "oxdna.out.log"
-        std_err_file = init_dir / "oxdna.err.log"
+        std_out_file = self.input_dir / "oxdna.out.log"
+        std_err_file = self.input_dir / "oxdna.err.log"
         logger.info("Starting oxDNA simulation")
         logger.debug(
             "oxDNA std_out->%s, std_err->%s",
@@ -152,7 +146,7 @@ class oxDNASimulator(jd_base.BaseSimulation):  # noqa: N801 oxDNA is a special w
         with std_out_file.open("w") as f_std, std_err_file.open("w") as f_err:
             cmd = [self.binary_path, "input"]
             logger.debug("running command: %s", cmd)
-            subprocess.check_call(cmd, stdout=f_std, stderr=f_err, cwd=init_dir)
+            subprocess.check_call(cmd, stdout=f_std, stderr=f_err, cwd=self.input_dir)
         logger.info("oxDNA simulation complete")
 
         return self._read_trajectory()
@@ -195,23 +189,15 @@ class oxDNASimulator(jd_base.BaseSimulation):  # noqa: N801 oxDNA is a special w
         std_out = self.build_dir / "jax_dna.cmake.std.log"
         std_err = self.build_dir / "jax_dna.cmake.err.log"
 
-        with std_out.open("w") as f_std, std_err.open("w") as f_err:
-            # --fresh is fairly new, prob want to explicitly remove to avoid
-            # issues. Removing these cmake files should have a similar effect
-            if (self.build_dir / "CMakeFiles").exists():
-                shutil.rmtree(self.build_dir / "CMakeFiles")
-                (self.build_dir / "CMakeCache.txt").unlink()
-
-            cmd = [cmake_bin, self.source_path, f"-DCMAKE_CXX_FLAGS=--include {model_h}"]
-            try:
-                cuda_cmd = [*cmd, "-DCUDA=ON", "-DCUDA_COMMON_ARCH=OFF"]
-                logger.debug("Attempting cmake for CUDA (std_out->%s, std_err->%s): %s", std_out, std_err, cuda_cmd)
-                subprocess.check_call(cuda_cmd, shell=False, cwd=self.build_dir, stdout=f_std, stderr=f_err)
-            except subprocess.CalledProcessError:
-                logger.debug("Running cmake for CPU (std_out->%s, std_err->%s): %s", std_out, std_err, cmd)
+        if not (self.build_dir / "CMakeLists.txt").exists():
+            with std_out.open("w") as f_std, std_err.open("w") as f_err:
+                cmd = [cmake_bin, self.source_path, f"-DCMAKE_CXX_FLAGS=--include {model_h}"]
+                if self.input_config["backend"] == "CUDA":
+                    cmd = [*cmd, "-DCUDA=ON", "-DCUDA_COMMON_ARCH=OFF"]
+                logger.debug("Attempting cmake using (std_out->%s, std_err->%s): %s", std_out, std_err, cmd)
                 subprocess.check_call(cmd, shell=False, cwd=self.build_dir, stdout=f_std, stderr=f_err)
 
-        logger.debug("cmake completed")
+            logger.debug("cmake completed")
 
         # rebuild the binary
         std_out = self.build_dir / "jax_dna.make.std.log"

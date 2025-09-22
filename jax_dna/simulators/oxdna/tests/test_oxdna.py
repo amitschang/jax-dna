@@ -64,14 +64,13 @@ def test_oxdna_init():
 def test_oxdna_run_raises_fnf():
     """Test that the oxDNA simulator raises FileNotFoundError."""
     test_dir = setup_test_dir(add_input=False)
-    sim = oxdna.oxDNASimulator(
-        input_dir=test_dir,
-        sim_type=typ.oxDNASimulatorType.DNA1,
-        energy_configs=[],
-        source_path='src',
-    )
     with pytest.raises(FileNotFoundError, match="No such file or directory"):
-        sim.run()
+        oxdna.oxDNASimulator(
+            input_dir=test_dir,
+            sim_type=typ.oxDNASimulatorType.DNA1,
+            energy_configs=[],
+            source_path='src',
+        )
     tear_down_test_dir(test_dir)
 
 
@@ -154,6 +153,8 @@ def test_oxdna_build(monkeypatch, tmp_path) -> None:
     tmp_src_dir = tmp_path / "src"
     tmp_src_dir.mkdir(parents=True, exist_ok=True)
     (tmp_src_dir / "model.h").write_text(model_h.read_text())
+    tmp_path.joinpath("input").write_text("backend = CPU\n")
+
 
     monkeypatch.setenv(oxdna.CMAKE_BIN_ENV_VAR, "echo")
     monkeypatch.setenv(oxdna.MAKE_BIN_ENV_VAR, "echo")
@@ -177,8 +178,7 @@ def test_oxdna_build(monkeypatch, tmp_path) -> None:
         energy_configs=[MockEnergyConfig({}), MockEnergyConfig({})],
         source_path=tmp_path,
     )
-    # prior to build we do not expect the build dir to exist
-    assert not sim.build_dir.exists()
+
     sim.build(
         new_params=[
             {

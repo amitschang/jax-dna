@@ -52,7 +52,7 @@ def main():
 
     # Sim configuration and Energy Function ==========================================================
 
-    input_dir = Path("data/templates/tm-8bp-2op")
+    input_dir = Path("data/templates/tm-6bp-2op")
 
     umbrella_config = {
         "n_steps": 5_000,

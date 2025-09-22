@@ -196,7 +196,13 @@ class oxDNASimulator(jd_base.BaseSimulation):  # noqa: N801 oxDNA is a special w
         std_err = self.build_dir / "jax_dna.cmake.err.log"
 
         with std_out.open("w") as f_std, std_err.open("w") as f_err:
-            cmd = [cmake_bin, self.source_path, "--fresh", f"-DCMAKE_CXX_FLAGS=--include {model_h}"]
+            # --fresh is fairly new, prob want to explicitly remove to avoid
+            # issues. Removing these cmake files should have a similar effect
+            if (self.build_dir / "CMakeFiles").exists():
+                shutil.rmtree(self.build_dir / "CMakeFiles")
+                (self.build_dir / "CMakeCache.txt").unlink()
+
+            cmd = [cmake_bin, self.source_path, f"-DCMAKE_CXX_FLAGS=--include {model_h}"]
             try:
                 cuda_cmd = [*cmd, "-DCUDA=ON", "-DCUDA_COMMON_ARCH=OFF"]
                 logger.debug("Attempting cmake for CUDA (std_out->%s, std_err->%s): %s", std_out, std_err, cuda_cmd)

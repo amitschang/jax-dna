@@ -6,6 +6,7 @@ repository. i.e. this file was invoked using:
 ``python -m examples.simulations.oxdna.oxDNA``
 """
 import functools
+import itertools
 import logging
 import shutil
 import tempfile
@@ -14,6 +15,7 @@ from pathlib import Path
 
 import jax
 import jax.numpy as jnp
+import ray
 import jax_dna.energy as jdna_energy
 import jax_dna.energy.dna1 as jdna1_energy
 import jax_dna.input.topology as jdna_top
@@ -47,12 +49,14 @@ objective_logging_config = {
 simulator_logging_config = objective_logging_config | {"filename": "simulator.log"}
 
 def main():
+    ray.init()
+
     logging.basicConfig(level=logging.DEBUG)
     logging.getLogger("jax").setLevel(logging.WARNING)
 
     # Sim configuration and Energy Function ==========================================================
 
-    input_dir = Path("data/templates/tm-8bp-2op")
+    input_dir = Path("data/templates/tm-6bp-2op")
 
     umbrella_config = {
         "n_steps": 5_000,
@@ -136,22 +140,25 @@ def main():
         opt_params: jdna_types.Params,
         observables: dict[str, typing.Any] = None, # observable map
     ) -> tuple[float, tuple[str, typing.Any]]:
-        infos = [i for i in observables.values() if isinstance(i, EnergyInfo)][0]
+        infos = pd.concat([i for i in observables.values() if isinstance(i, EnergyInfo)])
         umbrella_weights = infos["op_weight"].values
         op_values = infos[["op1", "op2"]].values
 
         obs = melting_temp_fn(traj, umbrella_weights, (9, 2), op_values, opt_params)
 
         expected_melting_temp = jnp.dot(weights, obs).sum()
-        loss = (expected_melting_temp - jd_obs.melting_temp.TARGETS["SL_avg_8bp"]) ** 2
+        loss = (expected_melting_temp - jd_obs.melting_temp.TARGETS["SL_avg_6bp"]) ** 2
         loss = jnp.sqrt(loss)
+        if not jnp.isfinite(loss):
+            raise ValueError("Non-finite loss encountered.")
         return loss, (("melting_temp", expected_melting_temp), {})
 
+    NUM_SIMS = 10
 
     melting_temp_objective = jdna_objective.DiffTReObjective(
         name="prop_twist",
-        required_observables=['traj-sim0', 'energy-sim0'],
-        needed_observables=['traj-sim0', 'energy-sim0'],
+        required_observables=[f"obs-{i}" for i in range(2*NUM_SIMS)],
+        needed_observables=[f"obs-{i}" for i in range(2*NUM_SIMS)],
         logging_observables=["loss", "melting_temp", "neff"],
         grad_or_loss_fn=melting_temp_loss_fn,
         energy_fn_builder=obj_energy_fn_builder,
@@ -166,28 +173,43 @@ def main():
         shutil.copytree(path, output_dir, dirs_exist_ok=True)
         return Path(output_dir)
 
-    oxdna_simulator = oxdna.oxDNASimulator(
-        input_dir=simdir_from_inputs(input_dir),
-        sim_type=jdna_types.oxDNASimulatorType.DNA1,
-        energy_configs=energy_configs,
-        source_path="../oxDNA"
-    )
+
+    @ray.remote
+    class RaySimulator:
+        def __init__(self, **kwargs):
+            self.simulator = oxdna.oxDNASimulator(**kwargs)
+
+        def run(self, params, meta_data):
+            traj = self.simulator.run(params, meta_data)
+            energy_df_columns = [
+                "time", "potential_energy", "acc_ratio_trans", "acc_ratio_rot",
+                "acc_ratio_vol", "op1", "op2", "op_weight"
+            ]
+            energy_df = EnergyInfo(
+                pd.read_csv(self.simulator.input_dir / "energy.dat", names=energy_df_columns, sep='\s+', skiprows=1)
+            )
+            return traj, energy_df
+
+
+    multi_simulator = [
+        RaySimulator.options(num_cpus=1).remote(
+            input_dir=simdir_from_inputs(input_dir),
+            sim_type=jdna_types.oxDNASimulatorType.DNA1,
+            energy_configs=energy_configs,
+            source_path="../oxDNA"
+        )
+        for _ in range(NUM_SIMS)
+    ]
 
     def sim_fun(params, meta_data):
-        traj = oxdna_simulator.run(params, seed=2104045939) #or seed=841595951) # This is a seed that produces both bound and unbound states
-        energy_df_columns = [
-            "time", "potential_energy", "acc_ratio_trans", "acc_ratio_rot",
-            "acc_ratio_vol", "op1", "op2", "op_weight"
-        ]
-        energy_df = EnergyInfo(
-            pd.read_csv(oxdna_simulator.input_dir / "energy.dat", names=energy_df_columns, sep='\s+', skiprows=1)
-        )
-        return traj, energy_df
+        futures = [sim.run.remote(params, meta_data) for sim in multi_simulator]
+        results = ray.get(futures)
+        return list(itertools.chain.from_iterable(results)) # flatten list
 
     simulator = jdna_simulator.BaseSimulator(
         name="oxdna-sim",
         fn=sim_fun,
-        exposes = ['traj-sim0', 'energy-sim0'],
+        exposes = [f"obs-{i}" for i in range(2*NUM_SIMS)],
         meta_data = {},
     )
 

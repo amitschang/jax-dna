@@ -7,8 +7,8 @@ import logging
 import os
 import shutil
 import subprocess
+import tempfile
 import typing
-import uuid
 from pathlib import Path
 
 import chex
@@ -71,11 +71,10 @@ class oxDNASimulator(jd_base.BaseSimulation):  # noqa: N801 oxDNA is a special w
         """Check the validity of the configuration."""
         if sum([self.binary_path is None, self.source_path is None]) != 1:
             raise ValueError("Must set one and only one of binary_path or source_path")
-        self.build_name = self.build_dir = None
+        self.build_dir = None
         if self.source_path is not None:
-            self.build_name = f"build_{uuid.uuid4()}"
             self.source_path = Path(self.source_path).resolve()
-            self.build_dir = self.source_path / self.build_name
+            self.build_dir = Path(tempfile.mkdtemp(prefix="jaxdna-oxdna-build-"))
             self.binary_path = self.build_dir / "bin" / "oxDNA"
         self.binary_path = Path(self.binary_path).resolve()
         self._initialize_logger()
@@ -197,7 +196,7 @@ class oxDNASimulator(jd_base.BaseSimulation):  # noqa: N801 oxDNA is a special w
         std_err = self.build_dir / "jax_dna.cmake.err.log"
 
         with std_out.open("w") as f_std, std_err.open("w") as f_err:
-            cmd = [cmake_bin, "..", "--fresh", f"-DCMAKE_CXX_FLAGS=--include {model_h}"]
+            cmd = [cmake_bin, self.source_path, "--fresh", f"-DCMAKE_CXX_FLAGS=--include {model_h}"]
             try:
                 cuda_cmd = [*cmd, "-DCUDA=ON", "-DCUDA_COMMON_ARCH=OFF"]
                 logger.debug("Attempting cmake for CUDA (std_out->%s, std_err->%s): %s", std_out, std_err, cuda_cmd)

@@ -1,5 +1,6 @@
 """Objectives implemented as ray actors."""
 
+from collections import OrderedDict
 import functools
 import logging
 import math
@@ -186,7 +187,7 @@ def compute_loss(
     ],
     ref_states: jax_md.rigid_body.RigidBody,
     ref_energies: jdna_types.Arr_N,
-    extra: dict[str, typing.Any] = None,
+    observables: dict[str, typing.Any] = None,
 ) -> tuple[float, tuple[float, jnp.ndarray]]:
     """Compute the grads, loss, and auxiliary values.
 
@@ -209,7 +210,7 @@ def compute_loss(
         new_energies,
         ref_energies,
     )
-    loss, (measured_value, meta) = loss_fn(ref_states, weights, energy_fn, opt_params, extra)
+    loss, (measured_value, meta) = loss_fn(ref_states, weights, energy_fn, opt_params, observables)
     return loss, (neff, measured_value, new_energies)
 
 
@@ -290,7 +291,7 @@ class DiffTReObjective(Objective):
         )
         sorted_obs = [x[1] for x in sorted_obtained_observables]
 
-        extra = {k: v for k,v in self._obtained_observables}
+        observables = OrderedDict(sorted_obtained_observables)
 
         (loss, (_, measured_value, new_energies)), grads = compute_loss_and_grad(
             self._opt_params,
@@ -299,7 +300,7 @@ class DiffTReObjective(Objective):
             self._grad_or_loss_fn,
             self._reference_states,
             self._reference_energies,
-            extra,
+            observables,
         )
 
         latest_neff = next(obs for obs in self._obtained_observables if obs[0] == "neff")

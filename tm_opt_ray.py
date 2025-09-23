@@ -56,6 +56,12 @@ def main():
         help="Learning rate for the optimizer.",
     )
     arg_parser.add_argument(
+        "--opt-steps",
+        type=int,
+        default=100,
+        help="Number of optimization steps.",
+    )
+    arg_parser.add_argument(
         "--debug",
         action="store_true",
         help="Enable debug logging.",
@@ -274,7 +280,7 @@ def main():
     # Aim has the concept of run parameters, add the learning rate to this one
     aim_logger.aim_run.set("learning_rate", args.learning_rate)
 
-    for i in range(100):
+    for i in range(args.opt_steps):
         state, opt_params, _ = optimizer.step(opt_params)
 
         for metric, value in optimizer.objective.logging_observables():

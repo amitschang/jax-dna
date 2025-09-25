@@ -179,6 +179,17 @@ def main():
             # opposed to files.
             return traj, energy_df
 
+        def get_hist(self):
+            hist_file = self.simulator.input_dir / self.simulator.input_config["last_hist_file"]
+            hist_df_columns = ["bind", "mindist", "unbiased"]
+            hist_df = pd.read_csv(hist_file, names=hist_df_columns, sep='\s+', usecols=[0,1,3], skiprows=1).set_index(["bind", "mindist"])
+            hist_df["unbiased_normed"] = hist_df["unbiased"] / hist_df["unbiased"].sum()
+            return hist_df
+
+        def update_weights(self, weights):
+            weights_file = self.simulator.input_dir / self.simulator.input_config["weights_file"]
+            weights.to_csv(weights_file, sep=' ', header=False)
+
     # Make a wrapper class to run all of these remote simulators as though they
     # are a single simulator, but implement the simulator interface that has
     # exposes function so it can be used in the optimizer
@@ -192,7 +203,21 @@ def main():
             futures = [sim.run.remote(params, meta_data) for sim in self.simulators]
             results = ray.get(futures)
             # Flatten the list, [traj, energy, traj, energy, ...]
-            return list(itertools.chain.from_iterable(results))
+            observables = list(itertools.chain.from_iterable(results))
+            # Prior to next run, update the umbrella weights based on the histograms
+            self.update_weights()
+            return observables
+
+        def update_weights(self):
+            hist = ray.get([simulator.get_hist.remote() for simulator in self.simulators])
+            hist = pd.concat(hist).reset_index().groupby(["bind", "mindist"]).sum()
+            weights = hist.query("unbiased_normed > 0").eval("weights = 1 / unbiased_normed")
+            weights["weights"] /= weights["weights"].min()  # for numerical stability
+            weights = weights[["weights"]]
+            # fill in zeroed states
+            weights = weights.reindex(hist.index, fill_value=0)
+            # Update these in all simulators
+            ray.get([simulator.update_weights.remote(weights) for simulator in self.simulators])
 
         def exposes(self):
             # each simulator returns 2 observables: traj and energy, but doesn't
@@ -287,8 +312,6 @@ def main():
             logger.log_metric(metric, value, i)
 
         optimizer.post_step(state, opt_params)
-
-        # update weights file here before next step, if necessary
 
 
 if __name__ == "__main__":

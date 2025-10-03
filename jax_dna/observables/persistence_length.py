@@ -21,7 +21,6 @@ TARGETS = {
     "oxDNA": 47.5,  # nm
 }
 
-
 def persistence_length_fit(correlations: jnp.ndarray, l0_av: float) -> tuple[float, float]:
     """Computes the Lp given correlations in alignment decay and average distance between base pairs.
 
@@ -113,7 +112,7 @@ def compute_metadata(base_sites: jnp.ndarray, quartets: jnp.ndarray) -> tuple[jn
 
 
 @chex.dataclass(frozen=True, kw_only=True)
-class LpMetadata(jd_obs.BaseObservable):
+class PersistenceLength(jd_obs.BaseObservable):
     """Computes the metadata relevant for computing the persistence length (Lp) for each state.
 
     To model Lp, we assume an infinitely long, semi-flexible polymer, in which correlations in
@@ -123,7 +122,7 @@ class LpMetadata(jd_obs.BaseObservable):
     a trajectory can be postprocessed to compute a value for Lp.
 
     Args:
-        quartets: a (n_bp, 2, 2) array containing the pairs of adjacent base pairs
+        quartets: a (n_bp-1, 2, 2) array containing the pairs of adjacent base pairs
             for which to compute the Lp
         displacement_fn: a function for computing displacements between two positions
     """
@@ -136,11 +135,24 @@ class LpMetadata(jd_obs.BaseObservable):
         if self.rigid_body_transform_fn is None:
             raise ValueError(jd_obs.ERR_RIGID_BODY_TRANSFORM_FN_REQUIRED)
 
-    def __call__(self, trajectory: jd_sio.SimulatorTrajectory) -> tuple[jnp.ndarray, jd_types.ARR_OR_SCALAR]:
+    def __call__(self, trajectory: jd_sio.SimulatorTrajectory, skip_ends=True) -> tuple[jnp.ndarray, jd_types.ARR_OR_SCALAR]:
         """Calculate aligment decay and average distance correlations for adjacent base pairs.
 
         Args:
-            trajectory (jd_traj.Trajectory): the trajectory to calculate the rise for
+            trajectory (jd_traj.Trajectory): the trajectory to calculate the persistence length for
+
+        Returns:
+            Tuple[jnp.ndarray, jd_types.ARR_OR_SCALAR]: the correlations in alignment decay and the the average
+            distance between adjacent base pairs for each state. The former will have shape (n_states, n_quartets-1)
+            and the latter will have shape (n_states,).
+        """
+        return self.get_all_corrs_and_l0s(trajectory, skip_ends)
+        
+    def get_all_corrs_and_l0s(self, trajectory: jd_sio.SimulatorTrajectory, skip_ends=True) -> tuple[jnp.ndarray, jd_types.ARR_OR_SCALAR]:
+        """Calculate aligment decay and average distance correlations for adjacent base pairs.
+
+        Args:
+            trajectory (jd_traj.Trajectory): the trajectory to calculate the persistence length for
 
         Returns:
             Tuple[jnp.ndarray, jd_types.ARR_OR_SCALAR]: the correlations in alignment decay and the the average
@@ -149,10 +161,34 @@ class LpMetadata(jd_obs.BaseObservable):
         """
         nucleotides = jax.vmap(self.rigid_body_transform_fn)(trajectory.rigid_body)
         base_sites = nucleotides.base_sites
-
-        all_corrs, all_l0_vals = vmap(compute_metadata, (0, None))(base_sites, self.quartets)
+        
+        if(skip_ends):
+            all_corrs, all_l0_vals = vmap(compute_metadata, (0, None))(base_sites[:,2:-2,:], self.quartets[2:-2])
+        else:
+            all_corrs, all_l0_vals = vmap(compute_metadata, (0, None))(base_sites, self.quartets)
 
         return all_corrs, all_l0_vals
+    
+    
+    def get_lp(self, trajectory: jd_sio.SimulatorTrajectory) -> float:
+        """Calculate persistence length by fitting autocorrelation function out to m <= cutoff separations between nucleotides.
+
+        Args:
+            trajectory (jd_traj.Trajectory): the trajectory to calculate the persistence length for
+            cutoff (int): the maximal base pair separation to consider tangent vector decay for.  
+        Returns:
+            float: the persistence length as computed by fitting the mean tangent vector correlation curve out to separations of m = cutoff bases.
+        """
+        nucleotides = jax.vmap(self.rigid_body_transform_fn)(trajectory.rigid_body)
+        base_sites = nucleotides.base_sites
+
+        all_corrs, all_l0_vals = self.get_all_corrs_and_l0s(trajectory)
+        
+        mean_all_corrs = jnp.mean(all_corrs, axis=0)
+        mean_l0_val = jnp.mean(all_l0_vals, axis=0)
+
+        fit_lp, fit_offset = persistence_length_fit(mean_all_corrs, mean_l0_val)
+        return fit_lp
 
 
 if __name__ == "__main__":
@@ -161,7 +197,7 @@ if __name__ == "__main__":
     import jax_dna.input.topology as jd_top
 
     test_geometry = jd_toml.parse_toml("jax_dna/input/dna1/default_energy.toml")["geometry"]
-    tranform_fn = functools.partial(
+    transform_fn = functools.partial(
         jd_energy.Nucleotide.from_rigid_body,
         com_to_backbone=test_geometry["com_to_backbone"],
         com_to_hb=test_geometry["com_to_hb"],
@@ -182,7 +218,7 @@ if __name__ == "__main__":
 
     quartets = jd_obs.get_duplex_quartets(202)
     displacement_fn, _ = space.free()
-    lp_metadata = LpMetadata(rigid_body_transform_fn=tranform_fn, quartets=quartets, displacement_fn=displacement_fn)
+    lp_metadata = PersistenceLength(rigid_body_transform_fn=transform_fn, quartets=quartets, displacement_fn=displacement_fn)
     output_all_corrs, output_all_l0_vals = lp_metadata(sim_traj)
 
     mean_all_corrs = jnp.mean(output_all_corrs, axis=0)

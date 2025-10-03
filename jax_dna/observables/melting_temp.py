@@ -191,28 +191,11 @@ class MeltingTemp(jd_obs.BaseObservable):
             energy_T_extrap = energy_fn_builder(merged_params) #this merges the dictionaries, adding the kT we want to extrapolate to. #FIXME: does this mess up the gradient tracing? Or is kt still non-optimizable?
             energies_T_extrap = energy_T_extrap(trajectory) #might need to be trajectory.rigid_body
 
-            def unbias_scan_fn(unbiased_counts_array, ref_id):
-                """Increment a counts array with the unbiased number of counts"""
-                #rigid_body_at_timestep_i = trajectory.slice(ref_id).rigid_body
-                ops = lax.dynamic_index_in_dim(bin_indices, ref_id, axis=0)
-                op1 = ops[0][0] #FIXME: this implementation assumes 2D order parameters, num_bonds and mindistance. Need to generalize
-                op2 = ops[0][1]
-
-                umbrella_weight = lax.dynamic_index_in_dim(umbrella_weights, ref_id, axis=0)
-                boltz_diff = jnp.exp(
-                        lax.dynamic_index_in_dim(energies_T0, ref_id, axis=0)/sim_kT -
-                        lax.dynamic_index_in_dim(energies_T_extrap, ref_id, axis=0)/extrapolated_temp
-                        )
-                weighted_term = ((1/umbrella_weight) * boltz_diff)[0]
-                return unbiased_counts_array.at[op1, op2].add(weighted_term), None
-
-
-            temp_unbiased_counts, _ = lax.scan(unbias_scan_fn, jnp.zeros(order_parameter_shape), jnp.arange(trajectory.length()))
-            total_counts = jnp.sum(temp_unbiased_counts)
-            unbound = jnp.sum(temp_unbiased_counts[0,:])
-            bound = total_counts - unbound
-            # If either is zero, we end up with NaN (Inf, but JAX turns into NaN through array)
-            phi = bound / unbound
+            boltz_factor = jnp.exp((energies_T0/sim_kT) - (energies_T_extrap/extrapolated_temp))
+            unbiased_counts = (1 / umbrella_weights) * boltz_factor
+            total_unbound = jnp.where(bin_indices[:, 0] == 0, unbiased_counts, 0).sum()
+            total_bound = jnp.where(bin_indices[:, 0] != 0, unbiased_counts, 0).sum()
+            phi = total_bound / total_unbound
             f_inf = compute_finf(phi) # apply finite size correction
 
             return f_inf

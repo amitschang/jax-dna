@@ -79,6 +79,7 @@ class oxDNASimulator(jd_base.BaseSimulation):  # noqa: N801 oxDNA is a special w
         self.binary_path = Path(self.binary_path).resolve()
         self.input_file = Path(self.input_dir) / "input"
         self.input_config = jd_oxdna.read(self.input_file)
+        self.input_dir = Path(self.input_dir).resolve()
         self._initialize_logger()
 
     def _initialize_logger(self) -> None:
@@ -157,7 +158,7 @@ class oxDNASimulator(jd_base.BaseSimulation):  # noqa: N801 oxDNA is a special w
         topology_file = self.input_dir / oxdna_config["topology"]
 
         topology = jd_top.from_oxdna_file(topology_file)
-        trajectory = jd_traj.from_file(trajectory_file, topology.strand_counts, is_oxdna=True)
+        trajectory = jd_traj.from_file(trajectory_file, topology.strand_counts, is_oxdna=False)
 
         logger.debug("oxDNA trajectory com size: %s", trajectory.state_rigid_body.center.shape)
 

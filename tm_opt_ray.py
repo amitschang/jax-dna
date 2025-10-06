@@ -11,6 +11,7 @@ import itertools
 import logging
 import shutil
 import tempfile
+import time
 import typing
 from pathlib import Path
 
@@ -141,8 +142,9 @@ def main():
     #
     # Might consider having the oxdna simulator do this internally, since it
     # seems like an important pattern.
+    TAG = f"{time.time()}"
     def simdir_from_inputs(path):
-        output_dir = tempfile.mkdtemp()
+        output_dir = tempfile.mkdtemp(prefix=f"oxdna_sim_{TAG}_")
         shutil.copytree(path, output_dir, dirs_exist_ok=True)
         return Path(output_dir)
 

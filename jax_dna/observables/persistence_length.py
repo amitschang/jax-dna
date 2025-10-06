@@ -147,7 +147,7 @@ class PersistenceLength(jd_obs.BaseObservable):
             and the latter will have shape (n_states,).
         """
         return self.get_all_corrs_and_l0s(trajectory, skip_ends)
-        
+
     def get_all_corrs_and_l0s(self, trajectory: jd_sio.SimulatorTrajectory, skip_ends=True) -> tuple[jnp.ndarray, jd_types.ARR_OR_SCALAR]:
         """Calculate aligment decay and average distance correlations for adjacent base pairs.
 
@@ -161,21 +161,21 @@ class PersistenceLength(jd_obs.BaseObservable):
         """
         nucleotides = jax.vmap(self.rigid_body_transform_fn)(trajectory.rigid_body)
         base_sites = nucleotides.base_sites
-        
+
         if(skip_ends):
             all_corrs, all_l0_vals = vmap(compute_metadata, (0, None))(base_sites[:,2:-2,:], self.quartets[2:-2])
         else:
             all_corrs, all_l0_vals = vmap(compute_metadata, (0, None))(base_sites, self.quartets)
 
         return all_corrs, all_l0_vals
-    
-    
+
+
     def get_lp(self, trajectory: jd_sio.SimulatorTrajectory) -> float:
         """Calculate persistence length by fitting autocorrelation function out to m <= cutoff separations between nucleotides.
 
         Args:
             trajectory (jd_traj.Trajectory): the trajectory to calculate the persistence length for
-            cutoff (int): the maximal base pair separation to consider tangent vector decay for.  
+            cutoff (int): the maximal base pair separation to consider tangent vector decay for.
         Returns:
             float: the persistence length as computed by fitting the mean tangent vector correlation curve out to separations of m = cutoff bases.
         """
@@ -183,7 +183,7 @@ class PersistenceLength(jd_obs.BaseObservable):
         base_sites = nucleotides.base_sites
 
         all_corrs, all_l0_vals = self.get_all_corrs_and_l0s(trajectory)
-        
+
         mean_all_corrs = jnp.mean(all_corrs, axis=0)
         mean_l0_val = jnp.mean(all_l0_vals, axis=0)
 

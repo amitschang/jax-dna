@@ -6,7 +6,6 @@ from collections.abc import Callable
 import chex
 import jax
 import jax.numpy as jnp
-from jax import lax
 
 import jax_dna.input.topology as jdna_top
 import jax_dna.observables.base as jd_obs

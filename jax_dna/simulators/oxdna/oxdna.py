@@ -71,6 +71,7 @@ class oxDNASimulator(jd_base.BaseSimulation):  # noqa: N801 oxDNA is a special w
         """Check the validity of the configuration."""
         if sum([self.binary_path is None, self.source_path is None]) != 1:
             raise ValueError("Must set one and only one of binary_path or source_path")
+
         self.build_dir = None
         if self.source_path is not None:
             self.source_path = Path(self.source_path).resolve()
@@ -78,8 +79,9 @@ class oxDNASimulator(jd_base.BaseSimulation):  # noqa: N801 oxDNA is a special w
             self.binary_path = self.build_dir / "bin" / "oxDNA"
         self.binary_path = Path(self.binary_path).resolve()
         self.input_file = Path(self.input_dir) / "input"
-        self.input_config = jd_oxdna.read(self.input_file)
         self.input_dir = Path(self.input_dir).resolve()
+
+        self.input_config = jd_oxdna.read(self.input_file)
         self._initialize_logger()
 
     def _initialize_logger(self) -> None:
@@ -136,6 +138,12 @@ class oxDNASimulator(jd_base.BaseSimulation):  # noqa: N801 oxDNA is a special w
         self.input_config["seed"] = seed or np.random.default_rng().integers(0, 2**32)
         jd_oxdna.write(self.input_config, self.input_file)
 
+        # remove existing trajectory and energy files (others?), otherwise they
+        # will be appended to
+        for output in ["trajectory_file", "energy_file"]:
+            if file := self.input_config.get(output, None):
+                self.input_dir.joinpath(file).unlink(missing_ok=True)
+
         std_out_file = self.input_dir / "oxdna.out.log"
         std_err_file = self.input_dir / "oxdna.err.log"
         logger.info("Starting oxDNA simulation")
@@ -153,9 +161,8 @@ class oxDNASimulator(jd_base.BaseSimulation):  # noqa: N801 oxDNA is a special w
         return self._read_trajectory()
 
     def _read_trajectory(self):
-        oxdna_config = jd_oxdna.read(self.input_dir / "input")
-        trajectory_file = self.input_dir / oxdna_config["trajectory_file"]
-        topology_file = self.input_dir / oxdna_config["topology"]
+        trajectory_file = self.input_dir / self.input_config["trajectory_file"]
+        topology_file = self.input_dir / self.input_config["topology"]
 
         topology = jd_top.from_oxdna_file(topology_file)
         trajectory = jd_traj.from_file(trajectory_file, topology.strand_counts, is_oxdna=False)
@@ -181,7 +188,8 @@ class oxDNASimulator(jd_base.BaseSimulation):  # noqa: N801 oxDNA is a special w
         logger.debug("build_dir: %s", self.build_dir)
 
         model_h = self.build_dir / "model.h"
-        model_h.write_text(self.source_path.joinpath("src/model.h").read_text())
+        if not model_h.exists():
+            model_h.write_text(self.source_path.joinpath("src/model.h").read_text())
 
         updated_params = [(ec | np).init_params() for ec, np in zip(self.energy_configs, new_params, strict=True)]
         new_params = [up.to_dictionary(include_dependent=True, exclude_non_optimizable=True) for up in updated_params]
@@ -211,7 +219,7 @@ class oxDNASimulator(jd_base.BaseSimulation):  # noqa: N801 oxDNA is a special w
         )
         with std_out.open("w") as f_std, std_err.open("w") as f_err:
             subprocess.check_call(
-                [make_bin, f"-j{self.n_build_threads}"],
+                [make_bin, f"-j{self.n_build_threads}", "clean", "oxDNA"],  # clean since model.h is not tracked
                 shell=False,  # noqa: S603 false positive
                 cwd=self.build_dir,
                 stdout=f_std,

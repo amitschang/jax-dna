@@ -170,27 +170,6 @@ class PersistenceLength(jd_obs.BaseObservable):
         return all_corrs, all_l0_vals
 
 
-    def get_lp(self, trajectory: jd_sio.SimulatorTrajectory) -> float:
-        """Calculate persistence length by fitting autocorrelation function out to m <= cutoff separations between nucleotides.
-
-        Args:
-            trajectory (jd_traj.Trajectory): the trajectory to calculate the persistence length for
-            cutoff (int): the maximal base pair separation to consider tangent vector decay for.
-        Returns:
-            float: the persistence length as computed by fitting the mean tangent vector correlation curve out to separations of m = cutoff bases.
-        """
-        nucleotides = jax.vmap(self.rigid_body_transform_fn)(trajectory.rigid_body)
-        base_sites = nucleotides.base_sites
-
-        all_corrs, all_l0_vals = self.get_all_corrs_and_l0s(trajectory)
-
-        mean_all_corrs = jnp.mean(all_corrs, axis=0)
-        mean_l0_val = jnp.mean(all_l0_vals, axis=0)
-
-        fit_lp, fit_offset = persistence_length_fit(mean_all_corrs, mean_l0_val)
-        return fit_lp
-
-
 if __name__ == "__main__":
     import matplotlib.pyplot as plt
 
@@ -208,11 +187,10 @@ if __name__ == "__main__":
     test_traj = jd_traj.from_file(
         path="data/templates/persistence-length/init.conf",
         strand_lengths=top.strand_counts,
+        is_oxdna=False,
     )
 
     sim_traj = jd_sio.SimulatorTrajectory(
-        seq=jnp.array(top.seq_idx),
-        strand_lengths=top.strand_counts,
         rigid_body=test_traj.state_rigid_body,
     )
 

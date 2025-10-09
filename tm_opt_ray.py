@@ -21,9 +21,11 @@ import ray
 import jax_dna.energy as jdna_energy
 import jax_dna.energy.dna1 as jdna1_energy
 import jax_dna.input.topology as jdna_top
+from jax_dna.input.trajectory import from_file
 import jax_dna.observables as jd_obs
 import jax_dna.optimization.objective as jdna_objective
 import jax_dna.optimization.optimization as jdna_optimization
+from jax_dna.simulators.io import SimulatorTrajectory
 import jax_dna.simulators.oxdna as oxdna
 import jax_dna.utils.types as jdna_types
 import jax_md
@@ -80,7 +82,7 @@ def main():
         "n_steps": 5_000,
         "batch_size": 1,
         "order_parameter_shape": (10, 2),
-        "extrap_temp_range": get_kt(jnp.linspace(280, 350, 10))
+        "extrap_temp_range": get_kt(jnp.linspace(280, 350, 20))
     }
     kt_range = umbrella_config["extrap_temp_range"]
     top = jdna_top.from_oxdna_file(input_dir / "sys.top")
@@ -260,14 +262,14 @@ def main():
         # well (and potentially other observables), we need to filter out the
         # energy data observables, we do so by looking for the EnergyInfo type.
         infos = pd.concat([i for i in observables.values() if isinstance(i, EnergyInfo)])
-        umbrella_weights = infos["op_weight"].values
-        op_values = infos[["op1", "op2"]].values
+        umbrella_weights = infos["op_weight"].to_numpy()
+        op_values = infos[["op1", "op2"]].to_numpy()
 
         # The (9, 2) for order parameter shape actually just needs to be larger
         # than the maximum order parameter in each dimension in the wfile. In
         # the future this may not need to be passed, the critical thing is we
         # look for where the bond op is zero/non-zero
-        obs = melting_temp_fn(traj, umbrella_weights, (9, 2), op_values, opt_params)
+        obs = melting_temp_fn(traj, umbrella_weights, [0,0], op_values, opt_params)
 
         expected_melting_temp = jnp.dot(weights, obs).sum()
         loss = (expected_melting_temp - jd_obs.melting_temp.TARGETS["SL_avg_6bp"]) ** 2

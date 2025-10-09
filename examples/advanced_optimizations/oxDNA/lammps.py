@@ -22,7 +22,12 @@ import jax_dna.observables as jd_obs
 import jax_dna.optimization.simulator as jdna_simulator
 import jax_dna.optimization.objective as jdna_objective
 import jax_dna.optimization.optimization as jdna_optimization
+from jax_dna.simulators.lammps.lammps_oxdna import LAMMPSOxDNA
 import jax_dna.simulators.oxdna as oxdna
+from jax_dna.ui.loggers import aim
+from jax_dna.ui.loggers.aim import AimLogger
+from jax_dna.ui.loggers.console import ConsoleLogger
+from jax_dna.ui.loggers.multilogger import MultiLogger
 import jax_dna.utils.types as jdna_types
 from jax_dna.input import topology
 
@@ -44,12 +49,14 @@ def main():
     opt_params = []
     for ec in energy_fn_configs:
         opt_params.append(
-            ec.opt_params if isinstance(ec, dna1_energy.StackingConfiguration) else {}
+            ec.opt_params
         )
 
     for op in opt_params:
         if "ss_stack_weights" in op:
             del op["ss_stack_weights"]
+        if "eps_backbone" in op:
+            del op["eps_backbone"]
 
     geometry = energy_config["geometry"]
     transform_fn = functools.partial(
@@ -79,13 +86,9 @@ def main():
         )
 
     # setup the simulator
-    input_dir = "data/templates/simple-helix"
-    simulator = oxdna.oxDNASimulator(
+    input_dir = "lammps_inputs"
+    simulator = LAMMPSOxDNA(
         input_dir=input_dir,
-        sim_type=jdna_types.oxDNASimulatorType.DNA1,
-        energy_configs=energy_fn_configs,
-        n_build_threads=4,
-        source_path="../oxDNA",
     )
 
     cwd = Path.cwd()
@@ -98,13 +101,7 @@ def main():
         params: jdna_types.Params,
         meta: jdna_types.MetaData,
     ) -> tuple[str, str]:
-        traj = simulator.run(params)
-        p = Path("energies")
-        p.mkdir(parents=True, exist_ok=True)
-        n = len(list(p.glob("*.npy")))
-        jnp.save(f"energies-{n}.npy", energy_fn_builder(params)(traj))
-        jdna_tree.save_pytree(traj, trajectory_loc)
-        return [traj]
+        return [simulator.run(params)]
 
     obs_trajectory = "trajectory"
 
@@ -125,7 +122,7 @@ def main():
         weights: jnp.ndarray,
         energy_model: jdna_energy.base.ComposedEnergyFunction,
         *args,
-        **kwargs
+        **kwargs,
     ) -> tuple[float, tuple[str, typing.Any]]:
         obs = prop_twist_fn(traj)
         expected_prop_twist = jnp.dot(weights, obs)
@@ -144,32 +141,34 @@ def main():
         opt_params = opt_params,
         min_n_eff_factor = 0.95,
         beta = jnp.array(1/kT),
-        n_equilibration_steps = 0, # periodic steps are already in oxdna
+        n_equilibration_steps = 1000,
+        max_valid_opt_steps=100,
     )
 
     opt = jdna_optimization.SimpleOptimizer(
         objective=propeller_twist_objective,
         simulator=trajectory_simulator,
-        optimizer = optax.adam(learning_rate=1e-3),
+        optimizer = optax.adam(learning_rate=1e-4),
     )
 
+    aim_run = aim.Run(experiment="oxdna-lammps-propeller-twist")
+    aim_logger = AimLogger(aim_run = aim_run)
+    console_logger = ConsoleLogger()
+    logger = MultiLogger([aim_logger, console_logger])
+    # Aim has the concept of run parameters, add the learning rate to this one
 
     for i in range(optimization_config["n_steps"]):
         opt_state, opt_params, _ = opt.step(opt_params)
 
-        if i % 5 == 0:
-            log_values = propeller_twist_objective.logging_observables()
-            for (name, value) in log_values:
-                print(f"{i}::{name}={value}")
+        log_values = propeller_twist_objective.logging_observables()
+        for (name, value) in log_values:
+            logger.log_metric(f"{name}", value, step=i)
 
         opt = opt.post_step(
             optimizer_state=opt_state,
             opt_params=opt_params,
         )
 
-        print('IS PROP READY:',propeller_twist_objective.is_ready())
-
-    simulator.cleanup_build()
 
 if __name__=="__main__":
     main()

@@ -12,6 +12,7 @@ We neglect the first 2 base pairs on either end of the duplex due to boundary ef
 We again use a learning rate of $0.001$ and resample states via the same protocol as described for pitch optimizations.
 """
 
+import argparse
 import functools
 import logging
 from pathlib import Path
@@ -24,10 +25,10 @@ import jax_md
 import optax
 import ray
 from tqdm import tqdm
-import operator
 
 import jax_dna.energy as jdna_energy
 import jax_dna.energy.dna1 as dna1_energy
+from jax_dna.input import oxdna_input
 import jax_dna.input.topology as jdna_top
 import jax_dna.observables as jd_obs
 import jax_dna.observables.persistence_length as persistence_length
@@ -39,29 +40,46 @@ from jax_dna.ui.loggers.aim import AimLogger
 from jax_dna.ui.loggers.console import ConsoleLogger
 from jax_dna.ui.loggers.multilogger import MultiLogger
 import jax_dna.utils.types as jdna_types
+from jax_dna.utils.units import get_kt_from_string
 
 jax.config.update("jax_enable_x64", True)
 
 
 # Logging configurations =======================================================
-logging.basicConfig(level=logging.INFO, filename="opt.log", filemode="w")
-objective_logging_config = {
-    "filename":"objective.log",
-    "filemode":"w",
-}
-simulator_logging_config = objective_logging_config | {"filename": "simulator.log"}
-# ==============================================================================
+logging.basicConfig(level=logging.INFO)
+logging.getLogger("jax").setLevel(logging.WARNING)
 
-
-# To combine the gradients of multiple objectives, we can use a mean, however
-# this example only has one objective, so it will remain unchanged.
-def tree_mean(trees:tuple[jdna_types.PyTree]) -> jdna_types.PyTree:
-    if len(trees) <= 1:
-        return trees[0]
-    summed = jax.tree.map(operator.add, *trees)
-    return jax.tree.map(lambda x: x / len(trees), summed)
+TARGET_LP = 40.0  # nm, or should this be 47.5?
 
 def main():
+    arg_parser = argparse.ArgumentParser()
+    arg_parser.add_argument(
+        "--num-sims",
+        type=int,
+        default=10,
+        help="Number of parallel simulators to run.",
+    )
+    arg_parser.add_argument(
+        "--learning-rate",
+        type=float,
+        default=1e-3,
+        help="Learning rate for the optimizer.",
+    )
+    arg_parser.add_argument(
+        "--opt-steps",
+        type=int,
+        default=100,
+        help="Number of optimization steps.",
+    )
+    arg_parser.add_argument(
+        "--debug",
+        action="store_true",
+        help="Enable debug logging.",
+    )
+    args = arg_parser.parse_args()
+
+    if args.debug:
+        logging.getLogger().setLevel(logging.DEBUG)
     # The coordination of objectives and simulators is done through Ray actors.
     # So we need to initialize a ray server
     ray.init(
@@ -78,18 +96,10 @@ def main():
     # Input configuration ======================================================
     input_dir = Path("data/templates/simple-helix-60bp-oxdna1")
     top = jdna_top.from_oxdna_file(input_dir / "sys.top")
+    sim_config = oxdna_input.read(input_dir / "input")
+    kT = get_kt_from_string(sim_config["T"])
 
-    optimization_config = {
-        "n_steps": 1_00,
-        "n_opt_steps": 25,
-        "oxdna_build_threads": 4,
-        "log_every": 10,
-        "n_oxdna_runs": 10,
-    }
-
-    TARGET_LP = 40. #40 nm
-    simulation_config, energy_config = dna1_energy.default_configs()
-    kT = simulation_config["kT"]
+    _, energy_config = dna1_energy.default_configs()
 
     # Energy Function ==========================================================
     energy_fns = dna1_energy.default_energy_fns()
@@ -155,17 +165,6 @@ def main():
         def run(self, params, meta_data=None):
             return self.simulator.run(params, meta_data)
 
-        def get_hist(self):
-            hist_file = self.simulator.input_dir / self.simulator.input_config["last_hist_file"]
-            hist_df_columns = ["bind", "mindist", "unbiased"]
-            hist_df = pd.read_csv(hist_file, names=hist_df_columns, sep='\s+', usecols=[0,1,3], skiprows=1).set_index(["bind", "mindist"])
-            hist_df["unbiased_normed"] = hist_df["unbiased"] / hist_df["unbiased"].sum()
-            return hist_df
-
-        def update_weights(self, weights):
-            weights_file = self.simulator.input_dir / self.simulator.input_config["weights_file"]
-            weights.to_csv(weights_file, sep=' ', header=False)
-
     # Make a wrapper class to run all of these remote simulators as though they
     # are a single simulator, but implement the simulator interface that has
     # exposes function so it can be used in the optimizer
@@ -199,7 +198,7 @@ def main():
             energy_configs=energy_fn_configs,
             source_path="../oxDNA"
         )
-        for _ in range(optimization_config["n_oxdna_runs"])
+        for _ in range(args.num_sims)
     ])
 
 
@@ -208,7 +207,7 @@ def main():
         rigid_body_transform_fn=transform_fn,
         displacement_fn = jax_md.space.free()[0],
         quartets=base.get_duplex_quartets(int(top.n_nucleotides / 2)),
-        )
+    )
 
     def lp_loss_fn(
         traj: jax_md.rigid_body.RigidBody,
@@ -221,7 +220,7 @@ def main():
         weighted_corr_mean = jnp.dot(weights, all_corrs) #DiffTRE weighting
         weighted_l0_mean = jnp.dot(weights, all_l0s)
 
-        fit_lp, fit_offset = persistence_length.persistence_length_fit(weighted_corr_mean[:40], weighted_l0_mean) # only consider m<=40 correlations
+        fit_lp, _= persistence_length.persistence_length_fit(weighted_corr_mean[:40], weighted_l0_mean) # only consider m<=40 correlations
 
         loss = (fit_lp - TARGET_LP) ** 2
         loss = jnp.sqrt(loss)
@@ -254,7 +253,7 @@ def main():
     logger = MultiLogger([aim_logger, console_logger])
 
     # Run optimization =========================================================
-    for i in tqdm(range(optimization_config["n_opt_steps"]), desc="Optimizing"):
+    for i in tqdm(range(args.opt_steps), desc="Optimizing"):
         opt_state, opt_params, grads = opt.step(opt_params)
 
         for (name, value) in opt.objective.logging_observables():

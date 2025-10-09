@@ -381,7 +381,7 @@ def test_total_energy(base_dir: str, t_kelvin: float, *, use_neighbors: bool):
     else:
         energies = jax.vmap(
             lambda s: energy_fn(
-                transform_fn(s),
+                s,
                 topology.seq,
                 topology.bonded_neighbors,
                 topology.unbonded_neighbors.T,
